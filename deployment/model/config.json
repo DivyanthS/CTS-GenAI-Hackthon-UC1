@@ -1,0 +1,6 @@
+{
+    "threshold": 0.23,
+    "model_type": "XGBoost",
+    "threshold_selection": "OOF predictions with recall constraint",
+    "optimization_metric": "PR-AUC"
+}
