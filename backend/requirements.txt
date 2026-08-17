@@ -1,0 +1,13 @@
+Flask
+Flask-Cors
+
+pydantic
+
+pandas
+numpy
+
+scikit-learn
+xgboost
+joblib
+
+python-dotenv
