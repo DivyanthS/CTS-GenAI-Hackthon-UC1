@@ -1,6 +1,13 @@
 {
     "threshold": 0.23,
     "model_type": "XGBoost",
-    "threshold_selection": "OOF predictions with recall constraint",
-    "optimization_metric": "PR-AUC"
+    "version": "2.0",
+    "trained_at": "2026-08-18T05:55:24.490719+00:00",
+    "metrics": {
+        "roc_auc": 0.95,
+        "pr_auc": 0.8889,
+        "accuracy": 0.8125,
+        "validation_samples": 16,
+        "training_samples": 62
+    }
 }

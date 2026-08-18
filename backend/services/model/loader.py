@@ -2,7 +2,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-import joblib
+try:
+    import joblib
+except ImportError:
+    import pickle as joblib
 
 from config.settings import (
     MODEL_CONFIG_PATH,
@@ -44,6 +47,11 @@ class ModelLoader:
         self.features = feature_data["features"]
 
         return self
+
+    def reload(self) -> "ModelLoader":
+        """Alias for load() to hot-reload model in memory."""
+        return self.load()
+
 
     def _validate_artifacts(self) -> None:
         """Ensure all required model artifacts exist."""

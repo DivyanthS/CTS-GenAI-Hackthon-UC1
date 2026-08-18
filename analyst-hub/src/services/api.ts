@@ -99,6 +99,50 @@ export interface BackendProviderResponse {
   provider: BackendProvider;
 }
 
+export interface BackendRun {
+  id: number;
+  run_id: string;
+  filename?: string | null;
+  total_rows?: number | null;
+  total_columns?: number | null;
+  total_providers?: number | null;
+  total_claims?: number | null;
+  total_beneficiaries?: number | null;
+  low_count?: number | null;
+  medium_count?: number | null;
+  high_count?: number | null;
+  critical_count?: number | null;
+  total_reimbursement?: number | null;
+  status?: string | null;
+  created_at?: string | null;
+  completed_at?: string | null;
+}
+
+export interface BackendRunsResponse {
+  runs: BackendRun[];
+  total: number;
+}
+
+export interface BackendRunResponse {
+  run: BackendRun;
+}
+
+export interface BackendModelStatus {
+  model_type?: string;
+  active_version?: string;
+  feature_count?: number;
+  decision_threshold?: number;
+  status?: string;
+  model_path?: string;
+  last_reloaded?: string;
+}
+
+export interface BackendThresholdConfig {
+  low_threshold: number;
+  high_threshold: number;
+  critical_threshold: number;
+}
+
 /* =========================================================
    BACKEND CLAIM
    ========================================================= */
@@ -542,6 +586,40 @@ export async function getClaimExplanation(
    CSV ANALYSIS
    ========================================================= */
 
+export async function validateCsv(
+  file: File,
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await api.post("/validate", formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+    timeout: 120_000,
+  });
+
+  return response.data;
+}
+
+export async function importProviders(
+  file: File,
+  runId?: string,
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (runId) formData.append("run_id", runId);
+
+  const response = await api.post("/providers/import", formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+    timeout: 120_000,
+  });
+
+  return response.data;
+}
+
 export async function analyzeCsv(
   file: File,
 ) {
@@ -569,6 +647,41 @@ export async function analyzeCsv(
     );
 
   return response.data;
+}
+
+export async function getRuns(): Promise<BackendRun[]> {
+  const response = await api.get<BackendRunsResponse>("/runs");
+  return response.data.runs ?? [];
+}
+
+export async function getRun(runId: string): Promise<BackendRun> {
+  const response = await api.get<BackendRunResponse>(`/runs/${encodeURIComponent(runId)}`);
+  return response.data.run;
+}
+
+export async function getReportJson(runId: string): Promise<unknown> {
+  const response = await api.get(`/reports/${encodeURIComponent(runId)}/json`);
+  return response.data;
+}
+
+export async function getModelStatus(): Promise<BackendModelStatus> {
+  const response = await api.get<BackendModelStatus>("/model/status");
+  return response.data;
+}
+
+export async function getThreshold(): Promise<BackendThresholdConfig> {
+  const response = await api.get<BackendThresholdConfig>("/model/threshold");
+  return response.data;
+}
+
+export async function updateThreshold(payload: Partial<BackendThresholdConfig>): Promise<BackendThresholdConfig> {
+  const response = await api.put<BackendThresholdConfig>("/model/threshold", payload);
+  return response.data;
+}
+
+export async function downloadPdf(runId: string): Promise<Blob> {
+  const response = await api.get(`/reports/${encodeURIComponent(runId)}/pdf`, { responseType: "blob" });
+  return response.data as Blob;
 }
 
 /* =========================================================

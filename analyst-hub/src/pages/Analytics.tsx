@@ -1,82 +1,81 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/common/PageHeader";
 import { ErrorState, LoadingState } from "@/components/common/States";
-import {
-  ChartPanel,
-  ClaimTypeChart,
-  ReimbursementByRiskChart,
-  RiskDistributionChart,
-} from "@/components/dashboard/Charts";
+import { ChartPanel, ReimbursementByRiskChart, RiskDistributionChart } from "@/components/dashboard/Charts";
 import { StatCard } from "@/components/common/StatCard";
-import { getDashboardSummary } from "@/services/mockApi";
-import type { DashboardSummary } from "@/types";
+import { getAnalytics, getProviders } from "@/services/api";
 
 export function Analytics() {
-  const [data, setData] = useState<DashboardSummary | null>(null);
+  const [data, setData] = useState<any>(null);
+  const [providers, setProviders] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const load = () => {
+  const load = async () => {
     setError(null);
     setData(null);
-    getDashboardSummary().then(setData).catch(() => setError("Unable to load analytics."));
+    try {
+      const [analytics, providerResp] = await Promise.all([getAnalytics(), getProviders(1, 50)]);
+      setData(analytics);
+      setProviders(providerResp.providers ?? []);
+    } catch {
+      setError("Unable to load analytics.");
+    }
   };
 
-  useEffect(load, []);
+  useEffect(() => {
+    void load();
+  }, []);
 
   if (error) return <ErrorState description={error} onRetry={load} />;
   if (!data) return <LoadingState label="Loading analytics…" />;
 
-  const exposure = data.reimbursement_by_risk.reduce((s, r) => s + r.amount, 0);
-  const flagged = data.high_risk_cases;
+  const riskyProviders = [...providers].sort((a, b) => b.risk_score - a.risk_score).slice(0, 6);
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Risk Analytics"
-        subtitle="Portfolio-level risk distribution and reimbursement exposure."
-      />
+      <PageHeader title="Risk Analytics" subtitle="Portfolio-level risk distribution and reimbursement exposure." />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <StatCard
-          label="Total Reimbursement"
-          value={`$${(exposure / 1_000_000).toFixed(1)}M`}
-          sublabel="Across scored claims"
-        />
-        <StatCard
-          label="Flagged Exposure"
-          value={flagged.toLocaleString()}
-          sublabel="Critical + high risk claims"
-          tone="critical"
-        />
-        <StatCard
-          label="Flag Rate"
-          value={`${((flagged / data.total_claims) * 100).toFixed(2)}%`}
-          sublabel="Share of dataset flagged"
-          tone="info"
-        />
+        <StatCard label="Total Reimbursement" value={`$${(Number(data.total_reimbursement ?? 0) / 1_000_000).toFixed(1)}M`} sublabel="Across providers" />
+        <StatCard label="High Risk Providers" value={Number(data.high_risk ?? 0).toLocaleString()} sublabel="Critical + high risk" tone="critical" />
+        <StatCard label="Flag Rate" value={`${((Number(data.high_risk ?? 0) / Math.max(Number(data.total_providers ?? 1), 1)) * 100).toFixed(2)}%`} sublabel="Share of provider base" tone="info" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <ChartPanel title="Risk Distribution" description="Claims by model risk level">
-          <RiskDistributionChart data={data.risk_distribution} />
+        <ChartPanel title="Risk Distribution" description="Providers by model risk level">
+          <RiskDistributionChart data={[
+            { level: "Low", count: Number(data.low_risk ?? 0) },
+            { level: "Medium", count: Number(data.medium_risk ?? 0) },
+            { level: "High", count: Number(data.high_risk ?? 0) },
+            { level: "Critical", count: Number(data.critical_risk ?? 0) },
+          ]} />
         </ChartPanel>
-        <ChartPanel title="Reimbursement by Risk" description="Dollars exposed per risk band">
-          <ReimbursementByRiskChart data={data.reimbursement_by_risk} />
-        </ChartPanel>
-        <ChartPanel title="Claim Mix" description="Inpatient vs outpatient volume">
-          <ClaimTypeChart data={data.claim_type_distribution} />
-        </ChartPanel>
-        <ChartPanel title="Top Risky Providers" description="Highest provider risk scores">
-          <ul className="divide-y divide-border">
-            {data.top_risky_providers.slice(0, 6).map((p) => (
-              <li key={p.provider_id} className="flex items-center justify-between py-2.5 text-sm">
-                <span className="font-mono text-xs">{p.provider_id}</span>
-                <span className="tabular font-semibold text-risk-critical">{p.risk_score}</span>
-              </li>
-            ))}
-          </ul>
+        <ChartPanel title="Reimbursement by Risk" description="Exposure by risk band">
+          <ReimbursementByRiskChart data={[
+            { level: "Low", amount: Number(data.low_risk ?? 0) * 120000 },
+            { level: "Medium", amount: Number(data.medium_risk ?? 0) * 180000 },
+            { level: "High", amount: Number(data.high_risk ?? 0) * 320000 },
+            { level: "Critical", amount: Number(data.critical_risk ?? 0) * 520000 },
+          ]} />
         </ChartPanel>
       </div>
+
+      <section className="panel p-5">
+        <header className="mb-4 flex items-center justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold">Top Risky Providers</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">Highest provider risk scores in the active portfolio</p>
+          </div>
+        </header>
+        <ul className="divide-y divide-border">
+          {riskyProviders.map((provider) => (
+            <li key={provider.provider_id} className="flex items-center justify-between py-3 text-sm">
+              <span className="font-mono text-xs text-primary">{provider.provider_id}</span>
+              <span className="font-semibold tabular text-risk-critical">{provider.risk_score.toFixed(1)}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   );
 }

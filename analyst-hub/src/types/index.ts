@@ -49,9 +49,20 @@ export interface Claim {
   procedure_codes?: string[];
 }
 
+export interface RiskFactor {
+  name: string;
+  provider_value?: number | null;
+  benchmark?: number | null;
+  difference_percent?: number | null;
+  impact?: string | null;
+  severity?: string | null;
+  explanation?: string | null;
+}
+
 export interface Provider {
   provider_id: string;
   risk_score: number;
+  risk_probability?: number;
   risk_level: RiskLevel;
   claim_count: number;
   beneficiary_count: number;
@@ -60,6 +71,18 @@ export interface Provider {
   inpatient_claims: number;
   outpatient_claims: number;
   status: CaseStatus;
+  decision?: string;
+  model_version?: string;
+  analysis_run_id?: string;
+  average_patient_age?: number;
+  average_chronic_condition_count?: number;
+  inpatient_share?: number;
+  average_part_a_coverage?: number;
+  average_part_b_coverage?: number;
+  claims_per_beneficiary?: number;
+  max_reimbursement?: number;
+  threshold?: number;
+  risk_factors?: RiskFactor[];
 }
 
 export interface Investigation {

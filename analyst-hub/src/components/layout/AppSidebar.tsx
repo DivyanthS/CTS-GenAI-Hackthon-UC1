@@ -1,14 +1,11 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   BarChart3,
-  FileSearch,
+  FileText,
   FolderSearch,
-  Gauge,
   LayoutDashboard,
-  ScanSearch,
   Settings,
   Shield,
-  Upload,
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -16,30 +13,25 @@ import { cn } from "@/lib/utils";
 const groups = [
   {
     label: "Overview",
-    items: [{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard }],
-  },
-  {
-    label: "Data",
     items: [
-      { to: "/import", label: "Import Data", icon: Upload },
-      { to: "/data-quality", label: "Data Quality", icon: Gauge },
+      { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { to: "/import", label: "Import Data", icon: FolderSearch },
     ],
   },
   {
-    label: "Risk Intelligence",
-    items: [
-      { to: "/fraud-analysis", label: "Fraud Analysis", icon: ScanSearch },
-      { to: "/claims", label: "Claims", icon: FileSearch },
-      { to: "/providers", label: "Providers", icon: Users },
-    ],
+    label: "Operations",
+    items: [{ to: "/providers", label: "Providers", icon: Users }],
   },
   {
-    label: "Investigation",
+    label: "Review",
     items: [{ to: "/investigations", label: "Investigation Queue", icon: FolderSearch }],
   },
   {
-    label: "Analytics",
-    items: [{ to: "/analytics", label: "Analytics", icon: BarChart3 }],
+    label: "Insights",
+    items: [
+      { to: "/analytics", label: "Analytics", icon: BarChart3 },
+      { to: "/reports", label: "Reports", icon: FileText },
+    ],
   },
   {
     label: "System",
@@ -61,7 +53,7 @@ export function AppSidebar() {
             FraudGuard AI
           </p>
           <p className="truncate text-[11px] text-sidebar-foreground/60">
-            Claims Payment Integrity
+            Provider Fraud Analytics
           </p>
         </div>
       </div>
@@ -74,7 +66,7 @@ export function AppSidebar() {
             </p>
             <ul className="space-y-0.5">
               {group.items.map((item) => {
-                const active = pathname.startsWith(item.to);
+                const active = pathname === item.to || pathname.startsWith(`${item.to}/`);
                 return (
                   <li key={item.to}>
                     <Link
@@ -106,7 +98,7 @@ export function AppSidebar() {
             <p className="truncate text-sm font-medium text-sidebar-accent-foreground">
               A. Whitfield
             </p>
-            <p className="truncate text-[11px] text-sidebar-foreground/60">Analyst</p>
+            <p className="truncate text-[11px] text-sidebar-foreground/60">Risk Analyst</p>
           </div>
         </div>
       </div>

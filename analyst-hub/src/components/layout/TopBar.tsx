@@ -33,7 +33,7 @@ export function TopBar({
       <div className="flex items-center gap-3">
         <div className="relative hidden w-64 md:block">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input aria-label="Search claims and providers" placeholder="Search claims, providers…" className="pl-9" />
+          <Input aria-label="Search providers and reports" placeholder="Search providers, runs…" className="pl-9" />
         </div>
         <button
           type="button"

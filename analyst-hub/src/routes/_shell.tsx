@@ -9,29 +9,20 @@ export const Route = createFileRoute("/_shell")({
 
 const titles: Record<string, { title: string; crumbs: { label: string; to?: string }[] }> = {
   "/dashboard": { title: "Dashboard", crumbs: [{ label: "Overview" }, { label: "Dashboard" }] },
-  "/import": { title: "Import Data", crumbs: [{ label: "Data" }, { label: "Import Data" }] },
-  "/data-quality": { title: "Data Quality", crumbs: [{ label: "Data" }, { label: "Data Quality" }] },
-  "/fraud-analysis": {
-    title: "Fraud Risk Analysis",
-    crumbs: [{ label: "Risk Intelligence" }, { label: "Fraud Analysis" }],
-  },
-  "/claims": { title: "Claims", crumbs: [{ label: "Risk Intelligence" }, { label: "Claims" }] },
   "/providers": {
     title: "Provider Risk Intelligence",
-    crumbs: [{ label: "Risk Intelligence" }, { label: "Providers" }],
+    crumbs: [{ label: "Operations" }, { label: "Providers" }],
   },
   "/investigations": {
     title: "Investigation Queue",
-    crumbs: [{ label: "Investigation" }, { label: "Queue" }],
+    crumbs: [{ label: "Review" }, { label: "Investigation Queue" }],
   },
-  "/analytics": { title: "Analytics", crumbs: [{ label: "Analytics" }] },
-  "/profile": { title: "Analyst Profile", crumbs: [{ label: "Account" }, { label: "Profile" }] },
+  "/analytics": { title: "Analytics", crumbs: [{ label: "Insights" }, { label: "Analytics" }] },
+  "/reports": { title: "Reports", crumbs: [{ label: "Insights" }, { label: "Reports" }] },
   "/settings": { title: "Settings", crumbs: [{ label: "System" }, { label: "Settings" }] },
 };
 
 function resolve(pathname: string) {
-  if (pathname.startsWith("/claims/"))
-    return { title: "Claim Details", crumbs: [{ label: "Claims", to: "/claims" }, { label: "Claim Details" }] };
   if (pathname.startsWith("/providers/"))
     return {
       title: "Provider Profile",
@@ -41,6 +32,11 @@ function resolve(pathname: string) {
     return {
       title: "Investigation Case",
       crumbs: [{ label: "Investigation Queue", to: "/investigations" }, { label: "Case" }],
+    };
+  if (pathname.startsWith("/reports/"))
+    return {
+      title: "Analysis Report",
+      crumbs: [{ label: "Reports", to: "/reports" }, { label: "Run Detail" }],
     };
   return titles[pathname] ?? { title: "FraudGuard AI", crumbs: [{ label: "FraudGuard AI" }] };
 }

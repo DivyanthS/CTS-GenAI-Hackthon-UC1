@@ -1,257 +1,147 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
-
-import pandas as pd
-
-from config.settings import COMBINED_DATA_FILE
+from models.database import get_db
+from models.claim import Claim
+from models.provider import Provider
 
 
 class ClaimDataService:
-    """Provides access to the mapped claim-level dataset."""
-
-    def __init__(
-        self,
-        csv_path: Path | None = None,
-    ):
-        self.csv_path = csv_path or COMBINED_DATA_FILE
-        self.claims: pd.DataFrame | None = None
-
-    def load(self) -> "ClaimDataService":
-        """Load the already mapped combined claim dataset."""
-
-        if not self.csv_path.is_file():
-            raise FileNotFoundError(
-                f"Combined dataset not found: {self.csv_path}"
-            )
-
-        self.claims = pd.read_csv(
-            self.csv_path,
-            low_memory=False,
-        )
-
-        required_columns = {
-            "ClaimID",
-            "Provider",
-        }
-
-        missing_columns = sorted(
-            required_columns - set(self.claims.columns)
-        )
-
-        if missing_columns:
-            raise ValueError(
-                "Combined dataset is missing required columns: "
-                + ", ".join(missing_columns)
-            )
-
-        return self
-
-    def _ensure_loaded(self) -> pd.DataFrame:
-        """Return the loaded claims dataframe."""
-
-        if self.claims is None:
-            self.load()
-
-        if self.claims is None:
-            raise RuntimeError(
-                "Claim data service failed to load."
-            )
-
-        return self.claims
-
-    @staticmethod
-    def _safe_record(
-        row: pd.Series,
-    ) -> dict[str, Any]:
-        """
-        Convert one pandas row into a JSON-safe dictionary.
-
-        NaN / NaT values are converted to None.
-        NumPy scalar values are converted to normal Python values.
-        """
-
-        record = (
-            row.astype(object)
-            .where(pd.notna(row), None)
-            .to_dict()
-        )
-
-        safe_record: dict[str, Any] = {}
-
-        for key, value in record.items():
-
-            if value is None:
-                safe_record[key] = None
-                continue
-
-            if hasattr(value, "item"):
-                try:
-                    value = value.item()
-                except (ValueError, TypeError):
-                    pass
-
-            safe_record[key] = value
-
-        return safe_record
-
-    @property
-    def row_count(self) -> int:
-        """Return the number of claims loaded."""
-
-        if self.claims is None:
-            return 0
-
-        return len(self.claims)
-
-    @property
-    def column_count(self) -> int:
-        """Return the number of columns loaded."""
-
-        if self.claims is None:
-            return 0
-
-        return len(self.claims.columns)
+    """
+    Database-backed service for querying claim records, filtering, and pagination.
+    """
 
     def get_claims(
         self,
         page: int = 1,
         page_size: int = 50,
         provider_id: str | None = None,
-    ) -> tuple[list[dict], int]:
+        claim_type: str | None = None,
+        search: str | None = None,
+        run_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
         """
-        Return one paginated page of claim records.
-
-        Optional provider_id filtering is applied before pagination.
+        Return paginated claims from the database.
         """
-
-        claims = self._ensure_loaded()
-
-        # ---------------------------------------------------------
-        # Validate pagination
-        # ---------------------------------------------------------
-
         if page < 1:
-            raise ValueError(
-                "Page must be greater than or equal to 1."
-            )
+            raise ValueError("Page must be >= 1.")
+        if page_size < 1 or page_size > 500:
+            raise ValueError("Page size must be between 1 and 500.")
 
-        if page_size < 1:
-            raise ValueError(
-                "Page size must be greater than or equal to 1."
-            )
+        with get_db() as db:
+            query = db.query(Claim)
 
-        if page_size > 100:
-            raise ValueError(
-                "Page size cannot exceed 100."
-            )
+            if run_id:
+                query = query.filter(Claim.analysis_run_id == run_id)
 
-        # ---------------------------------------------------------
-        # Normalize provider ID
-        # ---------------------------------------------------------
+            if provider_id:
+                clean_pid = str(provider_id).strip()
+                query = query.filter(Claim.provider_id == clean_pid)
 
-        if provider_id is not None:
-            provider_id = provider_id.strip()
+            if claim_type and claim_type.lower() != "all":
+                clean_ctype = str(claim_type).strip().capitalize()
+                query = query.filter(Claim.claim_type == clean_ctype)
 
-            if not provider_id:
-                provider_id = None
+            if search:
+                term = f"%{search.strip()}%"
+                query = query.filter(
+                    (Claim.claim_id.ilike(term))
+                    | (Claim.provider_id.ilike(term))
+                    | (Claim.beneficiary_id.ilike(term))
+                )
 
-        # ---------------------------------------------------------
-        # Filter before pagination
-        # ---------------------------------------------------------
+            total = query.count()
+            offset = (page - 1) * page_size
+            claims = query.order_by(Claim.id.desc()).offset(offset).limit(page_size).all()
 
-        if provider_id is not None:
+            results: list[dict[str, Any]] = []
+            for c in claims:
+                record = {
+                    "id": c.id,
+                    "claim_id": c.claim_id,
+                    "provider_id": c.provider_id,
+                    "beneficiary_id": c.beneficiary_id,
+                    "claim_type": c.claim_type,
+                    "claim_start_date": c.claim_start_date,
+                    "claim_end_date": c.claim_end_date,
+                    "reimbursement_amount": c.reimbursement_amount,
+                    "deductible_amount": c.deductible_amount,
+                    "attending_physician": c.attending_physician,
+                    "operating_physician": c.operating_physician,
+                    "other_physician": c.other_physician,
+                    "potential_fraud": c.potential_fraud,
+                    # Legacy fields:
+                    "ClaimID": c.claim_id,
+                    "Provider": c.provider_id,
+                    "BeneID": c.beneficiary_id,
+                    "ClaimType": c.claim_type,
+                    "InscClaimAmtReimbursed": c.reimbursement_amount,
+                    "DeductibleAmtPaid": c.deductible_amount,
+                    "ClaimStartDt": c.claim_start_date,
+                    "ClaimEndDt": c.claim_end_date,
+                    "AttendingPhysician": c.attending_physician,
+                    "OperatingPhysician": c.operating_physician,
+                    "OtherPhysician": c.other_physician,
+                    "PotentialFraud": c.potential_fraud,
+                    "raw_data": c.raw_data or {},
+                }
+                results.append(record)
 
-            filtered_claims = claims[
-                claims["Provider"]
-                .astype("string")
-                .str.strip()
-                == provider_id
-            ]
+            return results, total
 
-        else:
-
-            filtered_claims = claims
-
-        # ---------------------------------------------------------
-        # Total matching claims
-        # ---------------------------------------------------------
-
-        total = len(filtered_claims)
-
-        # ---------------------------------------------------------
-        # Pagination
-        # ---------------------------------------------------------
-
-        start = (page - 1) * page_size
-        end = start + page_size
-
-        page_data = filtered_claims.iloc[start:end]
-
-        # ---------------------------------------------------------
-        # JSON-safe conversion
-        # ---------------------------------------------------------
-
-        safe_records = [
-            self._safe_record(row)
-            for _, row in page_data.iterrows()
-        ]
-
-        return safe_records, total
-
-    def get_claim(
-        self,
-        claim_id: str,
-    ) -> dict[str, Any]:
+    def get_claim(self, claim_id: str) -> dict[str, Any]:
         """
-        Return one claim by ClaimID.
-
-        Raises
-        ------
-        KeyError
-            If the claim does not exist.
+        Return a single claim by claim_id.
         """
+        clean_cid = str(claim_id).strip()
+        with get_db() as db:
+            c = db.query(Claim).filter(Claim.claim_id == clean_cid).order_by(Claim.id.desc()).first()
+            if not c:
+                raise KeyError(f"Claim not found: {clean_cid}")
 
-        claims = self._ensure_loaded()
+            # Also fetch provider risk level if available
+            prov = db.query(Provider).filter(Provider.provider_id == c.provider_id).first()
+            prov_risk_level = prov.risk_level if prov else "Unknown"
+            prov_risk_score = prov.risk_score if prov else 0.0
 
-        claim_id = claim_id.strip()
+            return {
+                "id": c.id,
+                "claim_id": c.claim_id,
+                "provider_id": c.provider_id,
+                "beneficiary_id": c.beneficiary_id,
+                "claim_type": c.claim_type,
+                "claim_start_date": c.claim_start_date,
+                "claim_end_date": c.claim_end_date,
+                "reimbursement_amount": c.reimbursement_amount,
+                "deductible_amount": c.deductible_amount,
+                "attending_physician": c.attending_physician,
+                "operating_physician": c.operating_physician,
+                "other_physician": c.other_physician,
+                "potential_fraud": c.potential_fraud,
+                "provider_risk_level": prov_risk_level,
+                "provider_risk_score": prov_risk_score,
+                # Legacy fields:
+                "ClaimID": c.claim_id,
+                "Provider": c.provider_id,
+                "BeneID": c.beneficiary_id,
+                "ClaimType": c.claim_type,
+                "InscClaimAmtReimbursed": c.reimbursement_amount,
+                "DeductibleAmtPaid": c.deductible_amount,
+                "ClaimStartDt": c.claim_start_date,
+                "ClaimEndDt": c.claim_end_date,
+                "AttendingPhysician": c.attending_physician,
+                "OperatingPhysician": c.operating_physician,
+                "OtherPhysician": c.other_physician,
+                "PotentialFraud": c.potential_fraud,
+                "raw_data": c.raw_data or {},
+            }
 
-        if not claim_id:
-            raise KeyError("Claim ID cannot be empty.")
+    def claim_exists(self, claim_id: str) -> bool:
+        clean_cid = str(claim_id).strip()
+        with get_db() as db:
+            return db.query(Claim).filter(Claim.claim_id == clean_cid).first() is not None
 
-        matches = claims[
-            claims["ClaimID"]
-            .astype("string")
-            .str.strip()
-            == claim_id
-        ]
-
-        if matches.empty:
-            raise KeyError(
-                f"Claim not found: {claim_id}"
-            )
-
-        row = matches.iloc[0]
-
-        return self._safe_record(row)
-
-    def claim_exists(
-        self,
-        claim_id: str,
-    ) -> bool:
-        """Return whether a claim exists."""
-
-        claims = self._ensure_loaded()
-
-        claim_id = claim_id.strip()
-
-        if not claim_id:
-            return False
-
-        return (
-            claims["ClaimID"]
-            .astype("string")
-            .str.strip()
-            == claim_id
-        ).any()
+    @property
+    def row_count(self) -> int:
+        with get_db() as db:
+            return db.query(Claim).count()

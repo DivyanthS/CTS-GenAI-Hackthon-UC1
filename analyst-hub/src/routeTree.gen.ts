@@ -18,6 +18,7 @@ import { Route as ShellDataQualityRouteImport } from './routes/_shell.data-quali
 import { Route as ShellFraudAnalysisRouteImport } from './routes/_shell.fraud-analysis'
 import { Route as ShellImportRouteImport } from './routes/_shell.import'
 import { Route as ShellProfileRouteImport } from './routes/_shell.profile'
+import { Route as ShellReportsRouteImport } from './routes/_shell.reports'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as ShellClaimsIndexRouteImport } from './routes/_shell.claims.index'
 import { Route as ShellClaimsClaimIdRouteImport } from './routes/_shell.claims.$claimId'
@@ -70,6 +71,11 @@ const ShellProfileRoute = ShellProfileRouteImport.update({
   path: '/profile',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellReportsRoute = ShellReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellSettingsRoute = ShellSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -118,6 +124,7 @@ export interface FileRoutesByFullPath {
   '/fraud-analysis': typeof ShellFraudAnalysisRoute
   '/import': typeof ShellImportRoute
   '/profile': typeof ShellProfileRoute
+  '/reports': typeof ShellReportsRoute
   '/settings': typeof ShellSettingsRoute
   '/claims/$claimId': typeof ShellClaimsClaimIdRoute
   '/investigations/$caseId': typeof ShellInvestigationsCaseIdRoute
@@ -135,6 +142,7 @@ export interface FileRoutesByTo {
   '/fraud-analysis': typeof ShellFraudAnalysisRoute
   '/import': typeof ShellImportRoute
   '/profile': typeof ShellProfileRoute
+  '/reports': typeof ShellReportsRoute
   '/settings': typeof ShellSettingsRoute
   '/claims/$claimId': typeof ShellClaimsClaimIdRoute
   '/investigations/$caseId': typeof ShellInvestigationsCaseIdRoute
@@ -154,6 +162,7 @@ export interface FileRoutesById {
   '/_shell/fraud-analysis': typeof ShellFraudAnalysisRoute
   '/_shell/import': typeof ShellImportRoute
   '/_shell/profile': typeof ShellProfileRoute
+  '/_shell/reports': typeof ShellReportsRoute
   '/_shell/settings': typeof ShellSettingsRoute
   '/_shell/claims/$claimId': typeof ShellClaimsClaimIdRoute
   '/_shell/investigations/$caseId': typeof ShellInvestigationsCaseIdRoute
@@ -173,6 +182,7 @@ export interface FileRouteTypes {
     | '/fraud-analysis'
     | '/import'
     | '/profile'
+    | '/reports'
     | '/settings'
     | '/claims/$claimId'
     | '/investigations/$caseId'
@@ -190,6 +200,7 @@ export interface FileRouteTypes {
     | '/fraud-analysis'
     | '/import'
     | '/profile'
+    | '/reports'
     | '/settings'
     | '/claims/$claimId'
     | '/investigations/$caseId'
@@ -208,6 +219,7 @@ export interface FileRouteTypes {
     | '/_shell/fraud-analysis'
     | '/_shell/import'
     | '/_shell/profile'
+    | '/_shell/reports'
     | '/_shell/settings'
     | '/_shell/claims/$claimId'
     | '/_shell/investigations/$caseId'
@@ -288,6 +300,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellProfileRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/reports': {
+      id: '/_shell/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof ShellReportsRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/settings': {
       id: '/_shell/settings'
       path: '/settings'
@@ -347,6 +366,7 @@ interface ShellRouteChildren {
   ShellFraudAnalysisRoute: typeof ShellFraudAnalysisRoute
   ShellImportRoute: typeof ShellImportRoute
   ShellProfileRoute: typeof ShellProfileRoute
+  ShellReportsRoute: typeof ShellReportsRoute
   ShellSettingsRoute: typeof ShellSettingsRoute
   ShellClaimsClaimIdRoute: typeof ShellClaimsClaimIdRoute
   ShellInvestigationsCaseIdRoute: typeof ShellInvestigationsCaseIdRoute
@@ -363,6 +383,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellFraudAnalysisRoute: ShellFraudAnalysisRoute,
   ShellImportRoute: ShellImportRoute,
   ShellProfileRoute: ShellProfileRoute,
+  ShellReportsRoute: ShellReportsRoute,
   ShellSettingsRoute: ShellSettingsRoute,
   ShellClaimsClaimIdRoute: ShellClaimsClaimIdRoute,
   ShellInvestigationsCaseIdRoute: ShellInvestigationsCaseIdRoute,

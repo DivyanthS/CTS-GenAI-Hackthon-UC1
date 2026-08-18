@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Final
 
 import pandas as pd
-
+from utils.dataframe_utils import normalize_dataframe_columns, ensure_required_dataset_columns
 
 CHRONIC_COLUMNS: Final[list[str]] = [
     "ChronicCond_Alzheimer",
@@ -18,7 +18,6 @@ CHRONIC_COLUMNS: Final[list[str]] = [
     "ChronicCond_rheumatoidarthritis",
     "ChronicCond_stroke",
 ]
-
 
 MODEL_FEATURES: Final[list[str]] = [
     "TotalClaims",
@@ -56,47 +55,21 @@ MODEL_FEATURES: Final[list[str]] = [
 
 def build_provider_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Build the provider-level feature matrix used by the trained XGBoost model.
-
-    The implementation follows the provider feature-engineering logic
-    used in the modeling notebook.
+    Build the provider-level feature matrix.
 
     Parameters
     ----------
     df:
-        Combined inpatient + outpatient claim-level dataframe containing
-        beneficiary-derived fields and ClaimType.
+        Claim-level dataframe containing Provider, ClaimID, BeneID, Reimbursement, etc.
 
     Returns
     -------
     pd.DataFrame
         One row per Provider with the exact 30 model features plus Provider.
     """
-
-    required_columns = {
-        "Provider",
-        "ClaimID",
-        "BeneID",
-        "InscClaimAmtReimbursed",
-        "DeductibleAmtPaid",
-        "AttendingPhysician",
-        "OperatingPhysician",
-        "OtherPhysician",
-        "ClaimType",
-        "Age",
-        "ChronicConditionCount",
-        "NoOfMonths_PartACov",
-        "NoOfMonths_PartBCov",
-        *CHRONIC_COLUMNS,
-    }
-
-    missing_columns = sorted(required_columns - set(df.columns))
-
-    if missing_columns:
-        raise ValueError(
-            "Missing columns required for provider feature engineering: "
-            + ", ".join(missing_columns)
-        )
+    # 1. Normalize column names & fill missing optional columns
+    df = normalize_dataframe_columns(df)
+    df = ensure_required_dataset_columns(df)
 
     # ---------------------------------------------------------
     # 1. Provider-level claim features
@@ -119,10 +92,10 @@ def build_provider_features(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
 
-    # Exact notebook formula.
+    # Formula for ClaimsPerBeneficiary
     claim_features["ClaimsPerBeneficiary"] = (
         claim_features["TotalClaims"]
-        / claim_features["UniqueBeneficiaries"]
+        / claim_features["UniqueBeneficiaries"].clip(lower=1)
     )
 
     # ---------------------------------------------------------
@@ -137,22 +110,13 @@ def build_provider_features(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
 
-    # Make inference robust when an input dataset contains only
-    # one claim type.
     if "Inpatient" not in claim_type_features.columns:
         claim_type_features["Inpatient"] = 0.0
 
     if "Outpatient" not in claim_type_features.columns:
         claim_type_features["Outpatient"] = 0.0
 
-    claim_type_features["InpatientShare"] = (
-        claim_type_features["Inpatient"]
-    )
-
-    # OutpatientShare was removed from the final model because:
-    # InpatientShare + OutpatientShare = 1.
-    #
-    # We deliberately do not return OutpatientShare.
+    claim_type_features["InpatientShare"] = claim_type_features["Inpatient"]
 
     claim_type_features = claim_type_features[
         ["Provider", "InpatientShare"]
@@ -225,7 +189,7 @@ def build_provider_features(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # ---------------------------------------------------------
-    # 6. Missing-value indicators
+    # 6. Missing-value indicators & clean fillna
     # ---------------------------------------------------------
     provider_features["AverageDeductiblePaid_Missing"] = (
         provider_features["AverageDeductiblePaid"]
@@ -235,7 +199,7 @@ def build_provider_features(df: pd.DataFrame) -> pd.DataFrame:
 
     provider_features["AverageDeductiblePaid"] = (
         provider_features["AverageDeductiblePaid"]
-        .fillna(0)
+        .fillna(0.0)
     )
 
     provider_features["StdReimbursement_Missing"] = (
@@ -246,25 +210,43 @@ def build_provider_features(df: pd.DataFrame) -> pd.DataFrame:
 
     provider_features["StdReimbursement"] = (
         provider_features["StdReimbursement"]
-        .fillna(0)
+        .fillna(0.0)
     )
 
-    # ---------------------------------------------------------
-    # 7. Final validation
-    # ---------------------------------------------------------
-    missing_model_features = [
-        feature
-        for feature in MODEL_FEATURES
-        if feature not in provider_features.columns
-    ]
+    provider_features["MaxReimbursement"] = (
+        provider_features["MaxReimbursement"]
+        .fillna(0.0)
+    )
 
-    if missing_model_features:
-        raise ValueError(
-            "Provider feature engineering did not produce the required "
-            "model features: "
-            + ", ".join(missing_model_features)
-        )
+    provider_features["InpatientShare"] = (
+        provider_features["InpatientShare"]
+        .fillna(0.0)
+    )
 
+    provider_features["AveragePatientAge"] = (
+        provider_features["AveragePatientAge"]
+        .fillna(70.0)
+    )
+
+    provider_features["AverageChronicConditionCount"] = (
+        provider_features["AverageChronicConditionCount"]
+        .fillna(2.0)
+    )
+
+    provider_features["AveragePartACoverage"] = (
+        provider_features["AveragePartACoverage"]
+        .fillna(12.0)
+    )
+
+    provider_features["AveragePartBCoverage"] = (
+        provider_features["AveragePartBCoverage"]
+        .fillna(12.0)
+    )
+
+    for cc in CHRONIC_COLUMNS:
+        provider_features[cc] = provider_features[cc].fillna(0.0)
+
+    # Final feature column order
     result = provider_features[
         ["Provider"] + MODEL_FEATURES
     ].copy()

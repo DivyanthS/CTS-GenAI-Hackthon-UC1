@@ -1,35 +1,20 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Any
-
-import pandas as pd
-
-from services.claim_data import ClaimDataService
-from services.prediction_service import PredictionService
-from services.provider_data import ProviderDataService
+from models.database import get_db
+from models.claim import Claim
+from models.provider import Provider
+from models.risk_assessment import RiskAssessment
+from services.prediction.prediction_service import PredictionService
 
 
 class ClaimEvidenceService:
-    """Build deterministic claim context from the loaded claim/provider data.
-
-    The model is provider-level. This service exposes its prediction only as
-    provider risk and keeps claim observations separate.
+    """
+    Builds dataset-grounded claim explanation and context from the database.
     """
 
-    def __init__(
-        self,
-        claim_data_service: ClaimDataService,
-        provider_data_service: ProviderDataService,
-        prediction_service: PredictionService,
-    ):
-        self.claim_data_service = claim_data_service
-        self.provider_data_service = provider_data_service
+    def __init__(self, prediction_service: PredictionService):
         self.prediction_service = prediction_service
-
-    @staticmethod
-    def _number(value: Any) -> float | None:
-        number = pd.to_numeric(value, errors="coerce")
-        return float(number) if pd.notna(number) else None
 
     @staticmethod
     def _factor(
@@ -40,106 +25,139 @@ class ClaimEvidenceService:
         *,
         claim_value: bool = False,
     ) -> dict[str, Any]:
-        difference_percent = (
-            ((value - peer_value) / peer_value) * 100
+        diff_percent = (
+            ((value - peer_value) / peer_value) * 100.0
             if peer_value != 0
-            else None
+            else 0.0
         )
         return {
             "name": name,
-            **({"claim_value": value} if claim_value else {"provider_value": value}),
-            "peer_value": peer_value,
-            "difference_percent": difference_percent,
+            **({"claim_value": round(value, 2)} if claim_value else {"provider_value": round(value, 2)}),
+            "peer_value": round(peer_value, 2),
+            "difference_percent": round(diff_percent, 1),
             "direction": (
-                "above" if difference_percent is not None and difference_percent > 0
-                else "below" if difference_percent is not None and difference_percent < 0
+                "above" if diff_percent > 0
+                else "below" if diff_percent < 0
                 else "equal"
             ),
-            "impact": "contextual",
+            "impact": "HIGH" if abs(diff_percent) > 50 else "MEDIUM" if abs(diff_percent) > 20 else "LOW",
             "note": note,
         }
 
     def get_explanation(self, claim_id: str) -> dict[str, Any]:
-        claim = self.claim_data_service.get_claim(claim_id)
-        provider_id = str(claim["Provider"]).strip()
-        provider = self.provider_data_service.get_provider(provider_id)
-        provider_features = self.provider_data_service.provider_features
-        if provider_features is None:
-            raise RuntimeError("Provider data service has not been loaded.")
+        clean_cid = str(claim_id).strip()
 
-        # The only supported peer cohort is every other scored provider.
-        peers = provider_features[
-            provider_features["Provider"].astype("string") != provider_id
-        ]
-        cohort_size = int(len(peers))
-        provider_claim_count = self._number(provider.get("TotalClaims"))
-        provider_average_reimbursement = self._number(provider.get("AverageReimbursement"))
-        peer_claim_count = self._number(peers["TotalClaims"].mean())
-        peer_average_reimbursement = self._number(peers["AverageReimbursement"].mean())
-        claim_reimbursement = self._number(claim.get("InscClaimAmtReimbursed"))
+        with get_db() as db:
+            claim = db.query(Claim).filter(Claim.claim_id == clean_cid).order_by(Claim.id.desc()).first()
+            if not claim:
+                raise KeyError(f"Claim not found: {clean_cid}")
 
-        factors: list[dict[str, Any]] = []
-        if provider_claim_count is not None and peer_claim_count is not None:
+            target_claim_id = str(claim.claim_id)
+            provider_id = str(claim.provider_id)
+            provider = db.query(Provider).filter(Provider.provider_id == provider_id).first()
+
+            # Dataset benchmarks
+            all_providers = db.query(Provider).all()
+            peer_providers = [p for p in all_providers if p.provider_id != provider_id]
+            cohort_size = len(peer_providers)
+
+            if peer_providers:
+                peer_claim_count = sum(p.total_claims for p in peer_providers) / len(peer_providers)
+                peer_avg_reimb = sum(p.average_reimbursement for p in peer_providers) / len(peer_providers)
+            else:
+                peer_claim_count = provider.total_claims if provider else 1.0
+                peer_avg_reimb = provider.average_reimbursement if provider else 0.0
+
+            claim_reimb = float(claim.reimbursement_amount or 0.0)
+            prov_avg_reimb = float(provider.average_reimbursement if provider else 0.0)
+            prov_tot_claims = float(provider.total_claims if provider else 0.0)
+
+            factors: list[dict[str, Any]] = []
+
+            # 1. Provider Claim Volume vs Peer Average
             factors.append(self._factor(
-                "Provider claim volume", provider_claim_count, peer_claim_count,
+                "Provider claim volume",
+                float(prov_tot_claims),
+                float(peer_claim_count),
                 "Provider total claims compared with the mean for all other scored providers.",
             ))
-        if provider_average_reimbursement is not None and peer_average_reimbursement is not None:
+
+            # 2. Average Reimbursement vs Peer Average
             factors.append(self._factor(
-                "Average reimbursement", provider_average_reimbursement,
-                peer_average_reimbursement,
+                "Average reimbursement",
+                float(prov_avg_reimb),
+                float(peer_avg_reimb),
                 "Provider average reimbursement compared with the mean for all other scored providers.",
             ))
-        if claim_reimbursement is not None and provider_average_reimbursement is not None:
+
+            # 3. Claim Reimbursement vs Provider Average
             factors.append(self._factor(
-                "Claim reimbursement", claim_reimbursement, provider_average_reimbursement,
+                "Claim reimbursement",
+                float(claim_reimb),
+                float(prov_avg_reimb) if prov_avg_reimb > 0 else float(peer_avg_reimb),
                 "Selected claim reimbursement compared with this provider's average reimbursement per claim.",
                 claim_value=True,
             ))
 
+            # Related claims from this provider
+            related_db = (
+                db.query(Claim)
+                .filter(Claim.provider_id == provider_id, Claim.claim_id != clean_cid)
+                .limit(5)
+                .all()
+            )
+            related_claims = [
+                {
+                    "claim_id": str(r.claim_id),
+                    "claim_type": str(r.claim_type),
+                    "reimbursement": float(r.reimbursement_amount or 0.0),
+                    "claim_start_date": str(r.claim_start_date or ""),
+                    "claim_end_date": str(r.claim_end_date or ""),
+                }
+                for r in related_db
+            ]
+
+        # Prediction details for provider
         prediction = self.prediction_service.predict(provider_id)
-        related, _ = self.claim_data_service.get_claims(1, 100, provider_id)
-        related_claims = [
-            {
-                "claim_id": item.get("ClaimID"),
-                "claim_type": item.get("ClaimType"),
-                "reimbursement": item.get("InscClaimAmtReimbursed"),
-                "claim_start_date": item.get("ClaimStartDt"),
-                "claim_end_date": item.get("ClaimEndDt"),
-            }
-            for item in related
-            if str(item.get("ClaimID")) != str(claim.get("ClaimID"))
-        ][:5]
 
         review_focus = [
-            f"Review {factor['name'].lower()}, which is {factor['difference_percent']:.1f}% above its stated comparison value."
+            f"Review {factor['name'].lower()}, which is {factor['difference_percent']:.1f}% above its comparison value."
             for factor in factors
-            if factor["difference_percent"] is not None and factor["difference_percent"] >= 20
+            if factor["difference_percent"] is not None and factor["difference_percent"] >= 20.0
         ]
-        if prediction["decision"] == "FRAUD_FLAG":
+
+        if prediction.get("risk_level") in ["High", "Critical"]:
             review_focus.append(
-                "Review the provider-level model risk signal alongside the dataset-derived context."
+                f"Review provider-level {prediction.get('risk_level')} risk signal ({prediction.get('risk_score')}/100) alongside claim specifics."
             )
 
         factor_names = ", ".join(factor["name"].lower() for factor in factors)
+
         return {
-            "claim_id": claim.get("ClaimID"),
+            "claim_id": target_claim_id,
             "provider_id": provider_id,
-            "risk": {"scope": "provider", **prediction},
+            "risk": {
+                "scope": "provider",
+                "risk_score": prediction.get("risk_score"),
+                "risk_probability": prediction.get("risk_probability"),
+                "risk_level": prediction.get("risk_level"),
+                "decision": prediction.get("decision"),
+                "fraud_probability": prediction.get("fraud_probability"),
+                "threshold": prediction.get("threshold"),
+            },
             "summary": (
-                f"This claim is associated with provider {provider_id}. The provider-level model "
-                f"returned {prediction['decision']} at a probability of {prediction['fraud_probability']:.3f}. "
-                f"The returned context compares {factor_names or 'available dataset metrics'} for investigator review; "
-                "it does not assign a claim-level fraud probability."
+                f"This claim is associated with provider {provider_id}. The provider is assessed as "
+                f"{prediction.get('risk_level')} risk (Score: {prediction.get('risk_score'):.1f}/100). "
+                f"Dataset evidence evaluates {factor_names} for investigator review; "
+                "this does not assign an independent claim-level fraud verdict."
             ),
             "evidence_basis": {
-                "peer_definition": "mean of all other scored providers",
+                "peer_definition": "mean of all other scored providers in dataset",
                 "provider_cohort_size": cohort_size,
             },
             "factors": factors,
-            # The model does not expose validated feature-attribution values.
             "model_contributions": [],
             "related_claims": related_claims,
             "review_focus": review_focus,
-            "disclaimer": "Risk assessment is not a determination of fraud.",
+            "disclaimer": "Risk assessment is dataset-derived and not a legal determination of fraud.",
         }

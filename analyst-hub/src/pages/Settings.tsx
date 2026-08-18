@@ -1,82 +1,126 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import { getModelStatus, getThreshold, updateThreshold } from "@/services/api";
 
 export function Settings() {
   const [saved, setSaved] = useState(false);
-  const [threshold, setThreshold] = useState("70");
+  const [saving, setSaving] = useState(false);
+  const [thresholds, setThresholds] = useState({ low_threshold: 0.23, high_threshold: 0.6, critical_threshold: 0.8 });
+  const [modelStatus, setModelStatus] = useState<{ active_version?: string; status?: string; model_type?: string; decision_threshold?: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const [status, threshold] = await Promise.all([getModelStatus(), getThreshold()]);
+      setModelStatus(status);
+      setThresholds({
+        low_threshold: Number(threshold.low_threshold ?? 0.23),
+        high_threshold: Number(threshold.high_threshold ?? 0.6),
+        critical_threshold: Number(threshold.critical_threshold ?? 0.8),
+      });
+    } catch {
+      setError("Unable to load system thresholds and model status.");
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const saveThresholds = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await updateThreshold(thresholds);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      setError("Unable to update the risk thresholds.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Settings"
-        subtitle="Workspace profile, alerting and scoring preferences."
-        actions={
-          <Button
-            onClick={() => {
-              setSaved(true);
-              setTimeout(() => setSaved(false), 2000);
-            }}
-          >
-            {saved ? "Saved" : "Save changes"}
-          </Button>
-        }
+        subtitle="Operational model state, risk thresholds, and scoring configuration."
+        actions={<Button onClick={saveThresholds} disabled={saving}>{saving ? "Saving…" : saved ? "Saved" : "Save changes"}</Button>}
       />
 
+      {error && (
+        <div className="rounded-md border border-risk-critical/30 bg-risk-critical-soft px-4 py-3 text-sm text-risk-critical">
+          {error}
+        </div>
+      )}
+
       <section className="panel p-6">
-        <h2 className="text-sm font-semibold">Investigator profile</h2>
-        <div className="mt-5 grid gap-5 sm:grid-cols-2">
+        <h2 className="text-sm font-semibold">Model Configuration</h2>
+        <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           <div className="space-y-2">
-            <Label htmlFor="name">Full name</Label>
-            <Input id="name" defaultValue="Alex Morgan" />
+            <Label htmlFor="active-model">Active Model</Label>
+            <Input id="active-model" value={modelStatus?.model_type ?? "Loading…"} readOnly />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="email">Work email</Label>
-            <Input id="email" type="email" defaultValue="alex.morgan@payer.example" />
+            <Label htmlFor="model-version">Model Version</Label>
+            <Input id="model-version" value={modelStatus?.active_version ?? "Loading…"} readOnly />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="team">Team</Label>
-            <Input id="team" defaultValue="Special Investigations Unit" />
+            <Label htmlFor="model-status">Model Status</Label>
+            <Input id="model-status" value={modelStatus?.status ?? "Loading…"} readOnly />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="threshold">Review threshold (risk score)</Label>
-            <Input
-              id="threshold"
-              type="number"
-              min={0}
-              max={100}
-              value={threshold}
-              onChange={(e) => setThreshold(e.target.value)}
-            />
+            <Label htmlFor="threshold-current">Decision Threshold</Label>
+            <Input id="threshold-current" value={String(modelStatus?.decision_threshold ?? thresholds.low_threshold)} readOnly />
           </div>
         </div>
       </section>
 
       <section className="panel p-6">
-        <h2 className="text-sm font-semibold">Notifications</h2>
-        <ul className="mt-4 divide-y divide-border">
-          {[
-            ["Critical risk alerts", "Notify me when a claim scores in the critical band."],
-            ["Daily queue digest", "Summary of new and escalated cases each morning."],
-            ["Analysis run completion", "Notify me when a scoring run finishes."],
-          ].map(([title, desc], i) => (
-            <li key={title} className="flex items-center justify-between gap-4 py-4">
-              <div>
-                <p className="text-sm font-medium text-foreground">{title}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">{desc}</p>
-              </div>
-              <Switch defaultChecked={i !== 2} aria-label={title} />
-            </li>
-          ))}
-        </ul>
+        <h2 className="text-sm font-semibold">Risk Thresholds</h2>
+        <div className="mt-5 grid gap-5 sm:grid-cols-3">
+          <div className="space-y-2">
+            <Label htmlFor="low-threshold">Low Threshold</Label>
+            <Input
+              id="low-threshold"
+              type="number"
+              min={0}
+              max={1}
+              step="0.01"
+              value={thresholds.low_threshold}
+              onChange={(e) => setThresholds((prev) => ({ ...prev, low_threshold: Number(e.target.value) }))}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="high-threshold">High Threshold</Label>
+            <Input
+              id="high-threshold"
+              type="number"
+              min={0}
+              max={1}
+              step="0.01"
+              value={thresholds.high_threshold}
+              onChange={(e) => setThresholds((prev) => ({ ...prev, high_threshold: Number(e.target.value) }))}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="critical-threshold">Critical Threshold</Label>
+            <Input
+              id="critical-threshold"
+              type="number"
+              min={0}
+              max={1}
+              step="0.01"
+              value={thresholds.critical_threshold}
+              onChange={(e) => setThresholds((prev) => ({ ...prev, critical_threshold: Number(e.target.value) }))}
+            />
+          </div>
+        </div>
       </section>
-
-      <p className="rounded-md border border-dashed border-border px-4 py-3 text-xs text-muted-foreground">
-        Prototype settings are stored in-session only. No backend is connected.
-      </p>
     </div>
   );
 }

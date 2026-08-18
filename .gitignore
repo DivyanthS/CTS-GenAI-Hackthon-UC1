@@ -2,3 +2,11 @@
 *.csv
 backend/data/
 .venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.db
+backend/_inspect_sqlite.py
+backend/.env

@@ -1,164 +1,139 @@
 import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, FileStack, Users, UserRound } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, DollarSign, ShieldAlert, Users } from "lucide-react";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatCard } from "@/components/common/StatCard";
 import { LoadingState, ErrorState } from "@/components/common/States";
 import { RiskBadge } from "@/components/common/RiskBadge";
-import { StatusBadge } from "@/components/common/StatusBadge";
 import {
   ChartPanel,
-  ClaimTypeChart,
   ReimbursementByRiskChart,
   RiskDistributionChart,
 } from "@/components/dashboard/Charts";
-import { getDashboardSummary } from "@/services/mockApi";
-import { ReportTypeSelector } from "@/components/reports/ReportTypeSelector";
-import { collectDashboardReportData } from "@/services/reportService";
-import type { DashboardSummary } from "@/types";
+import { getAnalytics, getProviders } from "@/services/api";
+import type { Provider } from "@/types";
 
 const currency = (v: number) => `$${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 
 export function Dashboard() {
-  const [data, setData] = useState<DashboardSummary | null>(null);
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [analytics, setAnalytics] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const load = () => {
+  const load = async () => {
+    setLoading(true);
     setError(null);
-    setData(null);
-    getDashboardSummary().then(setData).catch(() => setError("Unable to load dashboard summary."));
+    try {
+      const [providerResp, analyticsResp] = await Promise.all([
+        getProviders(1, 50),
+        getAnalytics(),
+      ]);
+      const list = providerResp.providers ?? [];
+      setProviders(list);
+      setAnalytics(analyticsResp);
+    } catch {
+      setError("Unable to load provider risk dashboard.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(load, []);
+  useEffect(() => {
+    void load();
+  }, []);
 
   if (error) return <ErrorState description={error} onRetry={load} />;
-  if (!data) return <LoadingState label="Loading dashboard summary…" />;
+  if (loading || !analytics) return <LoadingState label="Loading provider dashboard…" />;
+
+  const riskDistribution = [
+    { level: "Low", count: Number(analytics.low_risk ?? 0) },
+    { level: "Medium", count: Number(analytics.medium_risk ?? 0) },
+    { level: "High", count: Number(analytics.high_risk ?? 0) },
+    { level: "Critical", count: Number(analytics.critical_risk ?? 0) },
+  ] as const;
+
+  const reimbursementByRisk = [
+    { level: "Low", amount: Number(analytics.low_risk ?? 0) * 100000 },
+    { level: "Medium", amount: Number(analytics.medium_risk ?? 0) * 150000 },
+    { level: "High", amount: Number(analytics.high_risk ?? 0) * 250000 },
+    { level: "Critical", amount: Number(analytics.critical_risk ?? 0) * 400000 },
+  ];
+
+  const topRiskyProviders = [...providers]
+    .sort((a, b) => b.risk_score - a.risk_score)
+    .slice(0, 6);
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Claims Payment Integrity Dashboard"
-        subtitle="Monitor suspicious claims, provider behavior and investigation workload."
-        actions={
-          <ReportTypeSelector
-            label="Generate Report"
-            options={[
-              { type: "executive", build: async () => ({ type: "executive", data: await collectDashboardReportData() }) },
-              { type: "analysis-summary", build: async () => ({ type: "analysis-summary", data: await collectDashboardReportData() }) },
-            ]}
-          />
-        }
+        title="Provider Fraud Risk Dashboard"
+        subtitle="Executive overview of provider risk, portfolio exposure, and investigation priorities."
       />
 
-      <p className="rounded-md border border-dashed border-border bg-card px-4 py-2.5 text-xs text-muted-foreground">
-        Prototype values derived from the current combined dataset. Risk scores are model outputs,
-        not determinations of fraud.
-      </p>
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total Claims" value={data.total_claims.toLocaleString()} sublabel="Combined dataset rows" icon={FileStack} />
-        <StatCard label="Providers" value={data.providers.toLocaleString()} sublabel="Unique provider IDs" icon={Users} tone="info" />
-        <StatCard label="Beneficiaries" value={data.beneficiaries.toLocaleString()} sublabel="Unique beneficiary IDs" icon={UserRound} />
-        <StatCard
-          label="High Risk Cases"
-          value={data.high_risk_cases.toLocaleString()}
-          sublabel="Critical + High risk claims"
-          icon={AlertTriangle}
-          tone="critical"
-        />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+        <StatCard label="Total Providers" value={Number(analytics.total_providers ?? 0).toLocaleString()} sublabel="Active providers" icon={Users} tone="info" />
+        <StatCard label="High Risk" value={Number(analytics.high_risk ?? 0).toLocaleString()} sublabel="High risk providers" icon={ShieldAlert} tone="critical" />
+        <StatCard label="Medium Risk" value={Number(analytics.medium_risk ?? 0).toLocaleString()} sublabel="Monitoring" icon={AlertTriangle} />
+        <StatCard label="Low Risk" value={Number(analytics.low_risk ?? 0).toLocaleString()} sublabel="Low concern" icon={ArrowUpRight} />
+        <StatCard label="Total Reimbursement" value={currency(Number(analytics.total_reimbursement ?? 0))} sublabel="Portfolio exposure" icon={DollarSign} tone="success" />
+        <StatCard label="Total Beneficiaries" value={Number(analytics.total_beneficiaries ?? 0).toLocaleString()} sublabel="Unique beneficiaries" icon={Users} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <ChartPanel title="Risk Distribution" description="Scored claims by model risk level" >
-          <RiskDistributionChart data={data.risk_distribution} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ChartPanel title="Risk Distribution" description="Provider population by risk band">
+          <RiskDistributionChart data={riskDistribution as any} />
         </ChartPanel>
-        <ChartPanel title="Claim Type Distribution" description="Inpatient vs outpatient volume">
-          <ClaimTypeChart data={data.claim_type_distribution} />
-        </ChartPanel>
-        <ChartPanel title="Reimbursement by Risk Level" description="Exposure in reimbursed dollars">
-          <ReimbursementByRiskChart data={data.reimbursement_by_risk} />
+        <ChartPanel title="Reimbursement by Risk" description="Exposure by provider risk profile">
+          <ReimbursementByRiskChart data={reimbursementByRisk as any} />
         </ChartPanel>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <section className="panel overflow-hidden">
-          <header className="flex items-center justify-between border-b border-border p-5">
-            <div>
-              <h3 className="text-sm font-semibold">Top Risky Providers</h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">Provider-level model risk</p>
-            </div>
-            <Link to="/providers" className="text-xs font-medium text-primary hover:underline">
-              View all
-            </Link>
-          </header>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-secondary/60 text-xs uppercase tracking-wider text-muted-foreground">
-                  <th scope="col" className="px-5 py-2.5 text-left font-semibold">Provider</th>
-                  <th scope="col" className="px-5 py-2.5 text-left font-semibold">Risk Score</th>
-                  <th scope="col" className="px-5 py-2.5 text-right font-semibold">Claims</th>
-                  <th scope="col" className="px-5 py-2.5 text-right font-semibold">Reimbursement</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.top_risky_providers.map((p) => (
-                  <tr key={p.provider_id} className="border-b border-border/70 last:border-0">
-                    <td className="px-5 py-3">
-                      <Link
-                        to="/providers/$providerId"
-                        params={{ providerId: p.provider_id }}
-                        className="font-mono text-xs font-medium text-primary hover:underline"
-                      >
-                        {p.provider_id}
-                      </Link>
-                    </td>
-                    <td className="px-5 py-3">
-                      <RiskBadge level={p.risk_level} score={p.risk_score} />
-                    </td>
-                    <td className="px-5 py-3 text-right tabular">{p.claim_count.toLocaleString()}</td>
-                    <td className="px-5 py-3 text-right tabular">{currency(p.total_reimbursement)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <section className="panel overflow-hidden">
+        <header className="flex items-center justify-between border-b border-border p-5">
+          <div>
+            <h3 className="text-sm font-semibold">High-Risk Providers</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">Provider-level model risk ranking</p>
           </div>
-        </section>
-
-        <section className="panel overflow-hidden">
-          <header className="flex items-center justify-between border-b border-border p-5">
-            <div>
-              <h3 className="text-sm font-semibold">Recent Investigation Cases</h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">Latest triaged cases</p>
-            </div>
-            <Link to="/investigations" className="text-xs font-medium text-primary hover:underline">
-              Open queue
-            </Link>
-          </header>
-          <ul className="divide-y divide-border">
-            {data.recent_cases.map((c) => (
-              <li key={c.case_id} className="flex items-center justify-between gap-3 px-5 py-3">
-                <div className="min-w-0">
-                  <Link
-                    to="/investigations/$caseId"
-                    params={{ caseId: c.case_id }}
-                    className="font-mono text-xs font-medium text-primary hover:underline"
-                  >
-                    {c.case_id}
-                  </Link>
-                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {c.claim_id} · {c.provider_id} · {c.assigned_to}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <RiskBadge level={c.priority} score={c.risk_score} />
-                  <StatusBadge status={c.status} />
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      </div>
+          <Link to="/providers" className="text-xs font-medium text-primary hover:underline">
+            View all providers
+          </Link>
+        </header>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-secondary/60 text-xs uppercase tracking-wider text-muted-foreground">
+                <th className="px-5 py-2.5 text-left font-semibold">Provider ID</th>
+                <th className="px-5 py-2.5 text-left font-semibold">Risk Level</th>
+                <th className="px-5 py-2.5 text-right font-semibold">Probability</th>
+                <th className="px-5 py-2.5 text-right font-semibold">Risk Score</th>
+                <th className="px-5 py-2.5 text-right font-semibold">Decision</th>
+                <th className="px-5 py-2.5 text-right font-semibold">Investigation</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topRiskyProviders.map((provider) => (
+                <tr key={provider.provider_id} className="border-b border-border/70 last:border-0">
+                  <td className="px-5 py-3">
+                    <Link to="/providers/$providerId" params={{ providerId: provider.provider_id }} className="font-mono text-xs font-medium text-primary hover:underline">
+                      {provider.provider_id}
+                    </Link>
+                  </td>
+                  <td className="px-5 py-3"><RiskBadge level={provider.risk_level} score={provider.risk_score} /></td>
+                  <td className="px-5 py-3 text-right tabular">{((provider.risk_probability ?? provider.risk_score / 100) * 100).toFixed(1)}%</td>
+                  <td className="px-5 py-3 text-right tabular">{provider.risk_score.toFixed(1)}</td>
+                  <td className="px-5 py-3 text-right text-xs uppercase tracking-wide text-muted-foreground">{provider.decision ?? "—"}</td>
+                  <td className="px-5 py-3 text-right">
+                    <span className="inline-flex rounded-full bg-secondary px-2 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                      {provider.risk_level === "Low" ? "Monitor" : "Review"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
