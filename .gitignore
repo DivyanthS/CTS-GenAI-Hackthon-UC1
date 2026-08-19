@@ -10,3 +10,5 @@ __pycache__/
 *.db
 backend/_inspect_sqlite.py
 backend/.env
+node_modules/
+.gitignore.backup
